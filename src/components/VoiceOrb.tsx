@@ -21,7 +21,6 @@ export default function VoiceOrb({ level = 0, listening = false, className = '',
 		const ctx = canvas.getContext('2d');
 		if (!ctx) return;
 
-		let raf: number;
 		const render = () => {
 			const width = canvas.width;
 			const height = canvas.height;
@@ -96,11 +95,10 @@ export default function VoiceOrb({ level = 0, listening = false, className = '',
 			ctx.arc(centerX, centerY, 4 + smoothed * 3, 0, Math.PI * 2);
 			ctx.fill();
 
-			raf = requestAnimationFrame(render);
+			animRef.current = requestAnimationFrame(render);
 		};
 
-		render();
-		animRef.current = raf;
+		animRef.current = requestAnimationFrame(render);
 		return () => {
 			if (animRef.current) cancelAnimationFrame(animRef.current);
 		};

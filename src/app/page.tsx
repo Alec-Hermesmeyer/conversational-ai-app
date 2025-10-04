@@ -43,15 +43,6 @@ export default function LoginPage() {
           >
             {isLoading ? 'Loading...' : 'Start Conversation'}
           </button>
-
-          <div className="text-center">
-            <a
-              href="/transcription"
-              className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 underline"
-            >
-              Go to Transcription App
-            </a>
-          </div>
         </div>
 
         <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
