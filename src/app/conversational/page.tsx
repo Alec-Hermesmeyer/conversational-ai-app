@@ -59,6 +59,7 @@ export default function ConversationalAI() {
   const sessionIdRef = useRef<string | null>(null);
   const audioUnlockedRef = useRef(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef2 = useRef<AudioContext | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
@@ -68,23 +69,48 @@ export default function ConversationalAI() {
   const MIN_SPEECH_DURATION = 100;  // Start recording almost immediately
   const SILENCE_DURATION = 700;     // Stop recording after 700ms silence
 
-  // Unlock audio playback (must be called from user gesture)
+  // Unlock audio playback (must be called from user gesture) - MOBILE FRIENDLY
   function unlockAudio() {
     if (audioUnlockedRef.current) return;
 
-    console.log('[Audio] Unlocking audio playback');
+    console.log('[Audio] Unlocking audio playback for mobile');
 
-    // Create silent audio and play it to unlock
-    const silentAudio = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAADhAC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAA4SpmwWWAAAAAAAAAAAAAAAAAAAAAAD/+xDEAAPAAAGkAAAAIAAANIAAAARMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
+    try {
+      // CRITICAL FOR MOBILE: Create and play audio SYNCHRONOUSLY in user gesture
+      const silentAudio = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAADhAC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAA4SpmwWWAAAAAAAAAAAAAAAAAAAAAAD/+xDEAAPAAAGkAAAAIAAANIAAAARMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
 
-    silentAudio.play()
-      .then(() => {
-        console.log('[Audio] Audio unlocked successfully');
-        audioUnlockedRef.current = true;
-      })
-      .catch((err) => {
-        console.warn('[Audio] Failed to unlock audio:', err);
-      });
+      // Play immediately (synchronously)
+      const playPromise = silentAudio.play();
+
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log('[Audio] Audio unlocked successfully');
+            audioUnlockedRef.current = true;
+          })
+          .catch((err) => {
+            console.warn('[Audio] Failed to unlock audio:', err);
+          });
+      }
+
+      // Also unlock AudioContext for iOS
+      if (!audioContextRef2.current) {
+        try {
+          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+          audioContextRef2.current = new AudioContext();
+          audioContextRef2.current.resume();
+          console.log('[Audio] AudioContext created and resumed');
+        } catch (e) {
+          console.warn('[Audio] AudioContext creation failed:', e);
+        }
+      } else {
+        audioContextRef2.current.resume();
+      }
+
+      audioUnlockedRef.current = true;
+    } catch (err) {
+      console.error('[Audio] Critical unlock error:', err);
+    }
   }
 
   // Base64 to blob
@@ -186,58 +212,89 @@ export default function ConversationalAI() {
     }
   }
 
-  // Play AI audio response
+  // Play AI audio response - MOBILE OPTIMIZED
   function playAIAudio(base64Audio: string, textResponse: string) {
     console.log('[Audio] Playing AI response');
 
     // CRITICAL: Stop any existing audio before playing new one
     stopAIAudio();
 
-    const audioBlob = base64ToBlob(base64Audio, 'audio/mpeg');
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
+    try {
+      const audioBlob = base64ToBlob(base64Audio, 'audio/mpeg');
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
 
-    // Register AI speaking
-    if (sessionIdRef.current) {
-      fetch(`${API_BASE}/api/conversational-learning/stream/ai-speaking`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          sessionId: sessionIdRef.current,
-          message: textResponse,
-          estimatedDurationMs: String(textResponse.length * 50),
-        }),
-      }).catch(() => {});
-    }
+      // MOBILE: Set attributes for better mobile support
+      audio.setAttribute('playsinline', 'true');
+      audio.setAttribute('webkit-playsinline', 'true');
+      audio.preload = 'auto';
 
-    setIsSpeaking(true);
-    currentAudioRef.current = audio;
-    setSession(prev => ({ ...prev, currentAudio: audio }));
+      // Load audio immediately
+      audio.load();
 
-    // Play audio with error handling
-    audio.play().catch((err) => {
-      console.error('[Audio] Failed to play audio:', err);
-      setError('Failed to play audio. Please ensure audio is allowed in your browser.');
-      setIsSpeaking(false);
-      currentAudioRef.current = null;
-      setSession(prev => ({ ...prev, currentAudio: null }));
-      URL.revokeObjectURL(audioUrl);
-    });
-
-    audio.onended = () => {
-      console.log('[Audio] AI finished speaking');
-      setIsSpeaking(false);
-      currentAudioRef.current = null;
+      // Register AI speaking
       if (sessionIdRef.current) {
-        fetch(`${API_BASE}/api/conversational-learning/stream/ai-finished`, {
+        fetch(`${API_BASE}/api/conversational-learning/stream/ai-speaking`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ sessionId: sessionIdRef.current }),
+          body: new URLSearchParams({
+            sessionId: sessionIdRef.current,
+            message: textResponse,
+            estimatedDurationMs: String(textResponse.length * 50),
+          }),
         }).catch(() => {});
       }
-      setSession(prev => ({ ...prev, currentAudio: null }));
-      URL.revokeObjectURL(audioUrl);
-    };
+
+      setIsSpeaking(true);
+      currentAudioRef.current = audio;
+      setSession(prev => ({ ...prev, currentAudio: audio }));
+
+      // MOBILE: Play with aggressive error handling
+      const playPromise = audio.play();
+
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log('[Audio] AI audio playing successfully');
+          })
+          .catch((err) => {
+            console.error('[Audio] PLAYBACK FAILED:', err);
+            setError(`Audio blocked: ${err.message}. Tap Start again.`);
+            setIsSpeaking(false);
+            currentAudioRef.current = null;
+            setSession(prev => ({ ...prev, currentAudio: null }));
+            URL.revokeObjectURL(audioUrl);
+          });
+      }
+
+      audio.onended = () => {
+        console.log('[Audio] AI finished speaking');
+        setIsSpeaking(false);
+        currentAudioRef.current = null;
+        if (sessionIdRef.current) {
+          fetch(`${API_BASE}/api/conversational-learning/stream/ai-finished`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ sessionId: sessionIdRef.current }),
+          }).catch(() => {});
+        }
+        setSession(prev => ({ ...prev, currentAudio: null }));
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = (e) => {
+        console.error('[Audio] Audio element error:', e);
+        setError('Audio playback error. Please try again.');
+        setIsSpeaking(false);
+        currentAudioRef.current = null;
+        setSession(prev => ({ ...prev, currentAudio: null }));
+        URL.revokeObjectURL(audioUrl);
+      };
+    } catch (err) {
+      console.error('[Audio] Critical playback error:', err);
+      setError(err instanceof Error ? err.message : 'Audio playback failed');
+      setIsSpeaking(false);
+    }
   }
 
   // Start recording
